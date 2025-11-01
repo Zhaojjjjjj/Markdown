@@ -11,8 +11,5 @@ export default defineConfig({
   },
   worker: {
     format: 'es'
-  },
-  optimizeDeps: {
-    exclude: ['highlight.js']
   }
 })
