@@ -181,6 +181,10 @@ defineExpose({
   margin-bottom: 16px;
 }
 
+.markdown-content :deep(p) {
+  margin: 0 0 16px 0;
+}
+
 .markdown-content :deep(h1) {
   font-size: 2em;
   font-weight: 600;

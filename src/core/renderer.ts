@@ -14,6 +14,7 @@ export class IncrementalRenderer {
   private rafId: number | null = null
   private pendingBlocks: MarkdownBlock[] = []
   private isRendering = false
+  private lastTempBlockId: string | null = null
 
   constructor(container: HTMLElement, config: RenderConfig = {}) {
     this.container = container
@@ -31,6 +32,16 @@ export class IncrementalRenderer {
    * 流式添加块
    */
   appendBlocks(blocks: MarkdownBlock[]): void {
+    // 如果有临时块，先清理
+    if (this.lastTempBlockId && blocks.length > 0) {
+      const tempElement = this.renderedBlocks.get(this.lastTempBlockId)
+      if (tempElement && !blocks[0].id.startsWith('__temp__')) {
+        tempElement.remove()
+        this.renderedBlocks.delete(this.lastTempBlockId)
+        this.lastTempBlockId = null
+      }
+    }
+    
     this.pendingBlocks.push(...blocks)
     this.scheduleRender()
   }
@@ -61,6 +72,18 @@ export class IncrementalRenderer {
     const fragment = document.createDocumentFragment()
 
     for (const block of chunk) {
+      // 如果是临时块，检查是否需要替换旧的临时块
+      if (block.id.startsWith('__temp__')) {
+        if (this.lastTempBlockId) {
+          const oldTemp = this.renderedBlocks.get(this.lastTempBlockId)
+          if (oldTemp) {
+            oldTemp.remove()
+            this.renderedBlocks.delete(this.lastTempBlockId)
+          }
+        }
+        this.lastTempBlockId = block.id
+      }
+      
       const element = this.renderBlock(block)
       fragment.appendChild(element)
       this.renderedBlocks.set(block.id, element)
@@ -68,15 +91,18 @@ export class IncrementalRenderer {
 
     // 批量插入DOM
     this.container.appendChild(fragment)
+    
+    // 自动滚动到底部
+    this.scrollToBottom()
 
     const renderTime = performance.now() - startTime
     
     this.isRendering = false
 
-    // 如果还有待渲染的块，继续调度
+    // 如果还有待渲染的块，立即继续调度（减少延迟）
     if (this.pendingBlocks.length > 0) {
-      // 如果上次渲染耗时过长，增加延迟
-      const delay = renderTime > 16 ? this.config.debounceMs : 0
+      // 只有在渲染耗时超过一帧时才延迟
+      const delay = renderTime > 16 ? Math.min(this.config.debounceMs, 8) : 0
       setTimeout(() => this.scheduleRender(), delay)
     }
   }
@@ -118,6 +144,16 @@ export class IncrementalRenderer {
     this.pendingBlocks = []
     this.renderedBlocks.clear()
     this.container.innerHTML = ''
+  }
+
+  /**
+   * 自动滚动到底部
+   */
+  private scrollToBottom(): void {
+    // 使用requestAnimationFrame确保DOM更新后再滚动
+    requestAnimationFrame(() => {
+      this.container.scrollTop = this.container.scrollHeight
+    })
   }
 
   /**

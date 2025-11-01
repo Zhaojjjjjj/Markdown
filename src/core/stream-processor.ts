@@ -10,7 +10,6 @@ export class StreamProcessor {
   private parser: MarkdownParser
   private renderer: IncrementalRenderer
   private buffer: string = ''
-  private lastProcessedIndex: number = 0
   private processedBlocks: MarkdownBlock[] = []
 
   constructor(container: HTMLElement, config?: RenderConfig) {
@@ -20,7 +19,7 @@ export class StreamProcessor {
 
   /**
    * 追加流式内容
-   * 策略：只解析和渲染新增的完整块
+   * 策略：只渲染完整的块，避免过度分割
    */
   async append(chunk: string): Promise<void> {
     this.buffer += chunk
@@ -37,51 +36,45 @@ export class StreamProcessor {
 
   /**
    * 提取完整的块
-   * 策略：保留不完整的块在buffer中，等待后续内容
+   * 策略：等待句号、换行或特定标记才认为块完整
    */
   private extractCompleteBlocks(): string[] {
-    const blocks = this.parser.splitIntoBlocks(this.buffer)
-    
-    // 检查最后一个块是否完整
-    const lastBlock = blocks[blocks.length - 1]
-    const isLastBlockComplete = this.isBlockComplete(lastBlock, this.buffer)
-
-    if (!isLastBlockComplete && blocks.length > 0) {
-      // 保留最后一个不完整的块
-      const incompleteBlock = blocks.pop()!
-      const lastIndex = this.buffer.lastIndexOf(incompleteBlock)
-      this.buffer = this.buffer.slice(lastIndex)
-      return blocks
+    // 检查是否有完整的段落（以双换行结束）
+    const doubleNewlineIndex = this.buffer.indexOf('\n\n')
+    if (doubleNewlineIndex !== -1) {
+      const completeContent = this.buffer.substring(0, doubleNewlineIndex)
+      this.buffer = this.buffer.substring(doubleNewlineIndex + 2)
+      return completeContent.trim() ? [completeContent] : []
     }
-
-    // 所有块都完整
-    this.buffer = ''
-    return blocks
+    
+    // 检查是否有以句号结尾的完整句子
+    const sentences = this.buffer.split(/([.!?。！？])\s+/)
+    if (sentences.length > 2) {
+      // 保留最后一个可能不完整的句子
+      const lastSentence = sentences.pop() || ''
+      const lastPunctuation = sentences.pop() || ''
+      this.buffer = lastSentence
+      
+      const completeContent = sentences.join('')
+      if (lastPunctuation) {
+        return [completeContent + lastPunctuation]
+      }
+    }
+    
+    // 检查特殊块（标题、代码块等）
+    const lines = this.buffer.split('\n')
+    for (let i = 0; i < lines.length - 1; i++) {
+      const line = lines[i].trim()
+      if (line.startsWith('#') || line.startsWith('```') || line.includes('|')) {
+        const blockContent = lines.slice(0, i + 1).join('\n')
+        this.buffer = lines.slice(i + 1).join('\n')
+        return [blockContent]
+      }
+    }
+    
+    return []
   }
 
-  /**
-   * 判断块是否完整
-   */
-  private isBlockComplete(block: string, fullBuffer: string): boolean {
-    const trimmed = block.trim()
-    
-    // 代码块必须有结束标记
-    if (trimmed.startsWith('```')) {
-      const codeBlockMatch = trimmed.match(/```/g)
-      return codeBlockMatch ? codeBlockMatch.length >= 2 : false
-    }
-
-    // 表格需要检查是否在末尾
-    if (trimmed.includes('|')) {
-      const blockEndIndex = fullBuffer.lastIndexOf(block) + block.length
-      const remaining = fullBuffer.slice(blockEndIndex).trim()
-      // 如果后面还有内容，且不是空行，可能表格未完成
-      return remaining === '' || remaining.startsWith('\n\n')
-    }
-
-    // 其他块类型认为完整
-    return true
-  }
 
   /**
    * 完成流式输入
@@ -104,7 +97,6 @@ export class StreamProcessor {
    */
   clear(): void {
     this.buffer = ''
-    this.lastProcessedIndex = 0
     this.processedBlocks = []
     this.renderer.clear()
   }
